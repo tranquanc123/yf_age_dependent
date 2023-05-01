@@ -55,8 +55,8 @@ par_sel_sum$Study_names = c(source_names, rep("NA", 2), rep("Age", 3), tail(sour
                             rep(source_names, 2), rep("NA", 2), rep("Age", 3), tail(source_names, -8), #One outbreak
                             rep(source_names, 4), rep("NA", 2), rep("Age", 3), tail(source_names, -8))
 par_sel_sum$par_names_group = c(rep("~gamma", N_study), "FOI mean", "FOI sd", paste("Age dependent ", 1:3), rep("~rho", N_study - 8),
-                          rep("~alpha", N_study), rep("time", N_study), "FOI mean", "FOI sd", paste("Age dependent ", 1:3), rep("~rho", N_study - 8),
-                          rep(c(rep("~alpha", N_study), rep("~time", N_study)), 2), "FOI mean", "FOI sd", paste("Age dependent ", 1:3), rep("~rho", N_study - 8))
+                          rep("~theta", N_study), rep("time", N_study), "FOI mean", "FOI sd", paste("Age dependent ", 1:3), rep("~rho", N_study - 8),
+                          rep(c(rep("~theta", N_study), rep("~time", N_study)), 2), "FOI mean", "FOI sd", paste("Age dependent ", 1:3), rep("~rho", N_study - 8))
 par_sel_sum$par_names_group = factor(par_sel_sum$par_names_group, levels = unique(par_sel_sum$par_names_group))
 par_sel_sum$Study_names = factor(par_sel_sum$Study_names, levels = rev(head(par_sel_sum$Study_names, N_study)))
 

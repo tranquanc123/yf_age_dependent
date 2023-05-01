@@ -45,7 +45,6 @@ cov_l =
 cov_v = unlist(cov_l)
 cov_v[cov_v < 0]<-1e-16
 cov_v[cov_v > 1]<-1 - 1e-16
-sus_v = (1-cov_v*VE) * pop_v
 n_row_sero = lengths(age_range_l)
 n_row_sero_l = unlist(mapply(rep, 1:length(n_row_sero), n_row_sero))
 
@@ -53,7 +52,6 @@ n_row_sero_l = unlist(mapply(rep, 1:length(n_row_sero), n_row_sero))
 year_case_LR_max = aggregate(case.noti.LR.df$year, list(nrow_case_LR_study), max)$x[nrow_case_LR_study]
 FOI_case_LR_id_row = year_case_LR_max - case.noti.LR.df$year + case.noti.LR.df$age + 1
 FOI_case_LR_id_row_max = max(FOI_case_LR_id_row)
-case_LR_sus = case.noti.LR.df$pop*(1 - case.noti.LR.df$cov*VE)
 study_agegroup = interaction(case.noti.LR.df$age_group_ID, case.noti.LR.df$study_id) %>% as.vector %>% factor(level = rle(.)$values)
 case_by_study_agegroup = aggregate(case.noti.LR.df$case, list(study_agegroup), unique)$x
 length_case_LR_study = rle(as.character(nrow_case_LR_study))$lengths
@@ -70,7 +68,7 @@ case.noti.LR.or.df$case = case_by_study_agegroup
 
 #Age dependent function####
 age_dep_func <- function(sn_par){
-  age_dep = dsn(0:99, sn_par[1], exp(sn_par[2]), sn_par[3])  #1: postition (range 0:99) 2: scale (positive) 3:skewness (real number)
+  age_dep = dsn(0:99, sn_par[1], sn_par[2], sn_par[3])  #1: postition (range 0:99) 2: scale (positive) 3:skewness (real number)
   return((age_dep/sum(age_dep)))
 }
 
@@ -79,31 +77,35 @@ par_id <- function(model_type){
   par_names <<- c()
   if(model_type == "Constant"){
     FOI_par_id <<- 1:N_study
-    FOI_avg_id <<- N_study + 1; FOI_sd_id <<- N_study + 2
-    Age_depend_id <<- FOI_sd_id + 1:3
-    par_names <<- c(par_names, paste0("FOI_", 1:N_study), "FOI_avg", "FOI_sd", paste0("Age_dep_", 1:3))
+    #FOI_avg_id <<- N_study + 1; FOI_sd_id <<- N_study + 2
+    Age_depend_id <<- max(FOI_par_id) + 1:3
+    par_names <<- c(par_names, paste0("FOI_", 1:N_study), paste0("Age_dep_", 1:3))
   } else if(model_type == "One outbreak"){
     FOI_par_id <<- 1:(N_study*2)
     alpha_id <<- 1:N_study;
     time_id <<- max(alpha_id) + 1:N_study
-    alpha_avg_id <<- max(time_id) + 1; alpha_sd_id <<- alpha_avg_id + 1
-    Age_depend_id <<- alpha_sd_id + 1:3
+    #alpha_avg_id <<- max(time_id) + 1; alpha_sd_id <<- alpha_avg_id + 1
+    Age_depend_id <<- max(time_id) + 1:3
     par_names <<- c(par_names,  paste0("FOI_alpha_", 1:N_study),  paste0("FOI_time_", 1:N_study), 
-                  "alpha_avg", "alpha_sd", paste0("Age_dep_", 1:3))
+                   paste0("Age_dep_", 1:3))
   } else {
     FOI_par_id <<- 1:(N_study*4)
     alpha1_id <<- 1:N_study;
     time1_id <<- max(alpha1_id) + 1:N_study
     alpha2_id <<- max(time1_id) + 1:N_study;
     time2_id <<- max(alpha2_id) + 1:N_study
-    alpha_avg_id <<- max(time2_id) + 1; alpha_sd_id <<- alpha_avg_id + 1
-    Age_depend_id <<- alpha_sd_id + 1:3
+    #alpha_avg_id <<- max(time2_id) + 1; alpha_sd_id <<- alpha_avg_id + 1
+    Age_depend_id <<- max(time2_id) + 1:3
     par_names <<- c(par_names,  paste0("FOI_alpha1_", 1:N_study),  paste0("FOI_time1_", 1:N_study), paste0("FOI_alpha2_", 1:N_study),  paste0("FOI_time2_", 1:N_study), 
-                  "alpha_avg", "alpha_sd", paste0("Age_dep_", 1:3))
+                   paste0("Age_dep_", 1:3))
   }
   
+  #VE:
+  VE_id <<- max(Age_depend_id) + 1
+  par_names <<- c(par_names, "VE")
+  
   #reporting proportion
-  rho_case_LR_id <<- max(Age_depend_id) + 1:N_case_LR_study
+  rho_case_LR_id <<- VE_id + 1:N_case_LR_study
   par_names <<- c(par_names, paste0("rho_case_LR_", 1:N_case_LR_study))
 }
 
@@ -162,12 +164,14 @@ gen_func <- function(par){
   #Include the effect of bg infection and age dependent:
   FOI_m = ((FOI_m)*age_dep_term) %>% matrix(nrow = 100, ncol = N_study)
   
-  rho_case_LR = unlist(par[rho_case_LR_id])
+  VE = par[VE_id]
+  
+  rho_case_LR = inverse_logit(unlist(par[rho_case_LR_id]))
   
   FOI_sero_m = FOI_m[, 1:N_sero_study]
   FOI_sero_cumsum = sapply(1:length(age_range_v), function(x) sum(FOI_sero_m[1:(age_range_v[x] + 1), nrow_sero_study_age[x]]))
   seropos = 1-exp(-FOI_sero_cumsum)
-  sus_v = (1-cov_v) * pop_v
+  sus_v = (1-cov_v*VE) * pop_v
   p = aggregate(sus_v*seropos, list(n_row_sero_l), sum)$x/aggregate(sus_v, list(n_row_sero_l), sum)$x
   p[p > 1 - 1e-16] = 1 - 1e-16
   p[p < 1e-16] = 1e-16
@@ -183,6 +187,7 @@ gen_func <- function(par){
     return(sum(FOI_case_LR_m[1:FOI_case_LR_id_int, nrow_case_LR_study[i]]))
   })
   l_rho_case_LR = mapply(rep, rho_case_LR, each = length_case_LR_study) %>% unlist #rep(rho_case_LR, each = N_case_LR_study*100)
+  case_LR_sus = case.noti.LR.df$pop*(1 - case.noti.LR.df$cov*VE)
   exp_cases_LR = case_LR_sus*exp(-FOI_case_LR_int_v)*(1 - exp(-FOI_case_LR_v))*l_rho_case_LR
   
   exp_case_LR_by_age_group = aggregate(exp_cases_LR, by = list(study_agegroup), FUN = sum)$x
