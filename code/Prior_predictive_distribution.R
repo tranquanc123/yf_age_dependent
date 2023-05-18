@@ -7,29 +7,33 @@ library(dplyr)
 ####Prior predictive distribution for skew-normal distribution:
 n = 1e5
 sn_par = data.frame(
+  xi = runif(n, -1, 97),
+  omega = rhnorm(n, 13),
+  alpha = rt(n,2,1/2))
+sn_par = data.frame(
   xi = rnorm(n, 50, 125),
   omega = rhnorm(n, 150),
   alpha = rt(n,2,1/2))
 sn_gen = sapply(1:nrow(sn_par), function(x) {
   age_dep = dsn(0:99, sn_par$xi[x], sn_par$omega[x], sn_par$alpha[x], log = T)
-  return(exp(age_dep - logSumExp(age_dep)))
+  return(exp(age_dep))
   })
 
 matplot(sn_gen[, sample(1:n, 1e3)]^0.2, type = "l", lty = 1)
 
-# # fold difference between exposure of highest and lowest age
-# scale_diff = apply(sn_gen,2,function(x){log(diff(log(range(x))),10)})
-# hist(scale_diff,50,col='gray',
-#      xlab='fold difference between exposure of high and low age on log10 scale',main='')
-# 
-# # peak age
-# max_peak = apply(sn_gen,2,which.max)
-# hist(max_peak[scale_diff > 0],50,col='gray',xlab='peak age',main='')
-# hist(max_peak[max_peak != 1 & max_peak != 100],50,col='gray',xlab='peak age',main='') #Removing peak age at 1 and 100
-# 
-# # difference between mode and mean
-# hist(apply(sn_gen,2,function(x){which.max(x)-sum((0:99)*x/sum(x))}),50,col='gray',
-#      xlab='difference between mode and mean',main='')
+# fold difference between exposure of highest and lowest age
+scale_diff = apply(sn_gen,2,function(x){log(diff(log(range(x))),10)})
+hist(scale_diff,50,col='gray',
+     xlab='fold difference between exposure of high and low age on log10 scale',main='')
+
+# peak age
+max_peak = apply(sn_gen,2,which.max)
+hist(max_peak[scale_diff > 0],50,col='gray',xlab='peak age',main='')
+hist(max_peak[max_peak != 1 & max_peak != 100],50,col='gray',xlab='peak age',main='') #Removing peak age at 1 and 100
+
+# difference between mode and mean
+hist(apply(sn_gen,2,function(x){which.max(x)-sum((0:99)*x/sum(x))}),50,col='gray',
+     xlab='difference between mode and mean',main='')
 
 ####Prior for gamma
 #Coun from the studies
@@ -70,7 +74,7 @@ for(coun in coun_list){
 #
 gamma_priors = data.frame(ISO = coun_list, Reduce(rbind, lapply(output_l, function(x) x$par)))
 
-saveRDS(gamma_priors, "../data/gamma_lnorm_priors_constant.rds")
+saveRDS(gamma_priors, "../data/gamma_lnorm_priors_constant_nonorm.rds")
 #Comparing the FOI:
 FOI_vary = data.frame(ISO = rep(coun_list, each = 100), lapply(1:nrow(gamma_priors), function(x) (rlnorm(n_cost_func, gamma_priors$X1[x], gamma_priors$X2[x])*sn_gen[,1:n_cost_func]) %>%
                                             apply(1, quantile, probs = c(0.025, 0.5, 0.975)) %>% t) %>% Reduce(rbind, .),

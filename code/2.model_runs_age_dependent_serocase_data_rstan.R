@@ -14,8 +14,11 @@ data_subset = all_data_subset[which.scenario]
 
 #Load data:
 sero_data = read.csv("../data/yf_sero_data_with_coverage_mod.csv")
+sero_data = filter(sero_data, YEAR > 1980) #only get data from 1980
+sero_study_id = rle(as.character(sero_data$STUDY_ID))
+sero_data = filter(sero_data, STUDY_ID %in% sero_study_id$values[which(sero_study_id$lengths > 1)]) # study with age group > 1
 case.noti.LR.df = read.csv("../data/yf_case_data_by_age_group_with_coverage_LR.csv")
-case.noti.PAHO.df = read.csv("../data/yf_case_data_by_age_group_with_coverage_PAHO.csv")
+case.noti.PAHO.df = read.csv("../data/yf_case_data_by_age_group_with_coverage_PAHO.csv") %>% filter(!(study_id %in% c("ECU_PAHO", "ARG_PAHO")))
 readRDS("../data/FOI_rho_prior.rds") %>% list2env(globalenv())
 prior_gamma = readRDS("../data/gamma_lnorm_priors_constant.rds")
 #Vaccine efficacy: alpha and beta of beta distribution
@@ -24,12 +27,14 @@ a_VE = 22.812; b_VE = 1.306
 #different subset of data:
 if(which.scenario == 1){
   case.noti.df = rbind(filter(case.noti.LR.df, country == "BRA"), case.noti.PAHO.df)
+  sero_data = sero_data[NULL,]
 } else if(which.scenario == 2){
   case.noti.df = filter(case.noti.LR.df, country != "BRA")
 } else {
   case.noti.df = rbind(case.noti.LR.df, case.noti.PAHO.df)
 }
 
+case.noti.df = case.noti.df[case.noti.df$case != 0,]
 ###Study index:
 #Sero 
 sero_study_id = rle(as.character(sero_data$STUDY_ID))
@@ -49,6 +54,7 @@ if(which.scenario == 1){
   N_study = N_sero_study + N_case_study
 }
 
+if(which.scenario != 1){
 #Speed up calculation the likelihood for sero data:
 ind.pop = which(substr(names(sero_data),0,4)=='POP_')
 ind.cov = which(substr(names(sero_data),0,4)=='COV_')
@@ -81,6 +87,7 @@ n_row_sero = lengths(age_range_l)
 n_row_sero_stop = cumsum(n_row_sero)
 n_row_sero_start = n_row_sero_stop - n_row_sero + 1
 Nrow_sero = length(n_row_sero)
+}
 #n_row_sero_l = unlist(mapply(rep, 1:length(n_row_sero), n_row_sero))
 
 #Speed up calculation for case LR data:
@@ -140,7 +147,7 @@ parameters {
 }
 
 model {
-  vector[100] age_dep_output_org;
+  //vector[100] age_dep_output_org;
   vector[100] age_dep_output;
   matrix[100, N] age_dep_m;
   matrix[N, 100] gamma_m;
@@ -168,29 +175,26 @@ model {
   
   //Age dependent component of FOI:
   for(age in 1:100){
-    age_dep_output_org[age] = exp(skew_normal_lpdf(age_seq[age]|age_dep1, age_dep2, age_dep3));
+    age_dep_output[age] = exp(skew_normal_lpdf(age_seq[age]|age_dep1, age_dep2, age_dep3));
   }
-  age_dep_output = age_dep_output_org ./ sum(age_dep_output_org);
-  //age_FOI = rep_matrix(age_dep_output, N); //getting the age dependent component FOI
-  
+  //age_dep_output = exp(age_dep_output_org - rep_vector(log_sum_exp(age_dep_output_org), 100));
+
   //Combine to get the FOI matrix:
-  age_dep_m = rep_matrix(age_dep_output, N);
-  gamma_m = rep_matrix(gamma, 100);
-  FOI_m = age_dep_m .* (gamma_m)';
+  age_dep_m = rep_matrix(age_dep_output, N); //row: age; col: study
+  gamma_m = rep_matrix(gamma, 100); //row: study; col: age
+  FOI_m = age_dep_m .* (gamma_m)'; //row: age; col: study
   
   //LL from case data:
   trans_rho_case = inv_logit(rho_case);
   FOI_case_m_appending = rep_matrix(FOI_m[100,], nrow_FOI_append);
   FOI_case_m_appended = append_row(FOI_m, FOI_case_m_appending);
   for(xi in 1:N_nrow_case_study){
+    int FOI_case_id_int = FOI_case_id_row[xi] - 1;
     FOI_case_v[xi] = FOI_case_m_appended[FOI_case_id_row[xi], nrow_case_study[xi]];
-  }
-  for(xii in 1:N_nrow_case_study){
-    int FOI_case_id_int = FOI_case_id_row[xii] - 1;
     if(FOI_case_id_int == 0)
-      FOI_case_int_v[xii] = 0.0;
+      FOI_case_int_v[xi] = 0.0;
     else
-      FOI_case_int_v[xii] = sum(head(FOI_case_m_appended[, nrow_case_study[xii]], FOI_case_id_int));
+      FOI_case_int_v[xi] = sum(head(FOI_case_m_appended[, nrow_case_study[xi]], FOI_case_id_int));
   }
   
   l_rho_case = trans_rho_case[nrow_case_study];
@@ -202,14 +206,15 @@ model {
   }
 
   for(xx in 1:(Nrow_case)){
-    if(exp_case_by_age_group[xx] < 1e-10)
-      exp_cases_mod[xx] = 1e-10;
+    if(exp_case_by_age_group[xx] < 1e-3)
+      exp_cases_mod[xx] = 1e-3;
     else 
       exp_cases_mod[xx] = exp_case_by_age_group[xx];
   }
-
+  //print(poisson_lpmf(case_by_study_agegroup| exp_cases_mod));
   // LL:
-  target += poisson_lpmf(case_by_study_agegroup| exp_cases_mod);
+  case_by_study_agegroup ~ poisson(exp_cases_mod);
+  //target += poisson_lpmf(case_by_study_agegroup| exp_cases_mod);
 }
 "
 
@@ -314,14 +319,15 @@ parameters {
 }
 
 model {
-  vector[100] age_dep_output_org;
+  //vector[100] age_dep_output_org;
   vector[100] age_dep_output;
   matrix[100, N] age_dep_m;
   matrix[N, 100] gamma_m;
   matrix[100, N] FOI_m;
   matrix[100, N_sero_study] FOI_sero_m;
   vector[N_row_sero_age] FOI_sero_cumsum;
-  vector[N_row_sero_age] seropos;
+  vector[N_row_sero_age] sus_pop;
+  vector[N_row_sero_age] seropos_prob;
   real p[Nrow_sero];
   real p_ele;
 
@@ -332,7 +338,6 @@ model {
   matrix[100 + nrow_FOI_append, N_case_study] FOI_case_m_appended;
   vector[N_nrow_case_study] FOI_case_v;
   vector[N_nrow_case_study] FOI_case_int_v; 
-  vector[N_nrow_case_study] exp_cases_prob;
   vector[N_nrow_case_study] exp_cases;
   vector[Nrow_case] exp_case_by_age_group;
   vector[Nrow_case] exp_cases_mod;
@@ -347,10 +352,9 @@ model {
   
   //Age dependent component of FOI:
   for(age in 1:100){
-    age_dep_output_org[age] = exp(skew_normal_lpdf(age_seq[age]|age_dep1, age_dep2, age_dep3));
+    age_dep_output[age] = exp(skew_normal_lpdf(age_seq[age]|age_dep1, age_dep2, age_dep3));
   }
-  age_dep_output = age_dep_output_org ./ sum(age_dep_output_org);
-  //age_FOI = rep_matrix(age_dep_output, N); //getting the age dependent component FOI
+  //age_dep_output = exp(age_dep_output_org - rep_vector(log_sum_exp(age_dep_output_org), 100));
   
   //Combine to get the FOI matrix:
   age_dep_m = rep_matrix(age_dep_output, N);
@@ -362,11 +366,14 @@ model {
   for(i in 1:N_row_sero_age){
     FOI_sero_cumsum[i] = sum(head(FOI_sero_m[, nrow_sero_study_age[i]], age_range_v[i] + 1));
   }
-  seropos = 1-exp(-FOI_sero_cumsum);
+  
+  seropos_prob = 1-exp(-FOI_sero_cumsum);
+  sus_pop = (cov_v * VE + (1 - cov_v * VE) .* seropos_prob) .* pop_v;
+  
   for(iii in 1:Nrow_sero){
     int n_row_sero_seq[n_row_sero[iii]];
     n_row_sero_seq = N_row_sero_age_range[n_row_sero_start[iii]:n_row_sero_stop[iii]];
-    p_ele = sum(pop_v[n_row_sero_seq] .* (1 - cov_v[n_row_sero_seq]*VE) .* seropos[n_row_sero_seq])/sum(pop_v[n_row_sero_seq] .* (1 - cov_v[n_row_sero_seq]*VE));
+    p_ele = sum(sus_pop[n_row_sero_seq])/sum(pop_v[n_row_sero_seq]);
     if (p_ele > 1 - 1e-16)
       p_ele = 1 - 1e-16;
     if (p_ele < 1e-16)
@@ -380,27 +387,24 @@ model {
   FOI_case_m_appending = rep_matrix(FOI_case_m[100,], nrow_FOI_append);
   FOI_case_m_appended = append_row(FOI_case_m, FOI_case_m_appending);
   for(xi in 1:N_nrow_case_study){
+    int FOI_case_id_int = FOI_case_id_row[xi] - 1;
     FOI_case_v[xi] = FOI_case_m_appended[FOI_case_id_row[xi], nrow_case_study[xi]];
-  }
-  for(xii in 1:N_nrow_case_study){
-    int FOI_case_id_int = FOI_case_id_row[xii] - 1;
     if(FOI_case_id_int == 0)
-      FOI_case_int_v[xii] = 0.0;
+      FOI_case_int_v[xi] = 0.0;
     else
-      FOI_case_int_v[xii] = sum(head(FOI_case_m_appended[, nrow_case_study[xii]], FOI_case_id_int));
+      FOI_case_int_v[xi] = sum(head(FOI_case_m_appended[, nrow_case_study[xi]], FOI_case_id_int));
   }
   
   l_rho_case = trans_rho_case[nrow_case_study];
-  exp_cases_prob = exp(-FOI_case_int_v) .* (1 - exp(-FOI_case_v)) .* l_rho_case;
-  exp_cases = exp_cases_prob .* pop .* (1 - cov*VE);
+  exp_cases = exp(-FOI_case_int_v) .* (1 - exp(-FOI_case_v)) .* l_rho_case .* pop .* (1 - cov*VE);
 
   for(xviii in 1:Nrow_case){
     exp_case_by_age_group[xviii] = sum(exp_cases[study_agegroup_start[xviii]:study_agegroup_stop[xviii]]);
   }
 
   for(xx in 1:(Nrow_case)){
-    if(exp_case_by_age_group[xx] < 1e-10)
-      exp_cases_mod[xx] = 1e-10;
+    if(exp_case_by_age_group[xx] < 1e-3)
+      exp_cases_mod[xx] = 1e-3;
     else 
       exp_cases_mod[xx] = exp_case_by_age_group[xx];
   }
@@ -474,14 +478,16 @@ stan_fit <- stan(
   model_code = stan_code,  # Stan program
   data = data_stan,    # named list of data
   chains = 4,             # number of Markov chains
-  warmup = 1e2,          # number of warmup iterations per chain
-  iter = 1e3,            # total number of iterations per chain
-  cores = 4,
-  thin = 1# number of cores (could use one per chain)
+  warmup = 5e1,          # number of warmup iterations per chain
+  iter = 1e2,            # total number of iterations per chain
+  cores = 4,  # number of cores (could use one per chain)
+  thin = 1,
+  control = list(adapt_delta = 0.80, stepsize = 5)
   #refresh = 0             # no progress shown
 )
-
-saveRDS(stan_fit, file = paste0("../output/MCMC_output/MCMC_output_1e5_sero_case_age_depend_", model_type, "_datasubset_", data_subset, "_rstan.Rdata"))
+traceplot(stan_fit, pars = c("age_dep1", "age_dep2", "age_dep3", "lp__"))
+extract(stan_fit)
+saveRDS(stan_fit, file = paste0("../output/MCMC_output/MCMC_output_1e4_unipeakprior_sero_case_age_depend_", model_type, "_datasubset_", data_subset, "_rstan.Rdata"))
 
 #Results from crc ####
 library(dplyr)
