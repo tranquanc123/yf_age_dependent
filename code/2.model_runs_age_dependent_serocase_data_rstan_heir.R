@@ -1,16 +1,13 @@
 library(dplyr)
 library(rstan)
+library(extraDistr)
 
 #setwd("/home/quan/Documents/NotreDame/Alex/Yellow fever/yf_age_exposure/code/")
 #running parallel in crc, which.scenario is the index:
-args = commandArgs(trailingOnly=TRUE)
-which.scenario = as.numeric(args[1])
-#which.scenario = 1
 
 #all_model_type = c('Constant', "One_outbreak", "Two_outbreaks")
-all_data_subset = c("SA", "AF", "SA_AF")
 model_type = "Constant" #all_model_type[which.scenario]
-data_subset = all_data_subset[which.scenario]
+data_subset = "SA_AF"
 
 #Load data:
 sero_data = read.csv("../data/yf_sero_data_with_coverage_mod.csv")
@@ -25,16 +22,11 @@ prior_gamma = readRDS("../data/gamma_lnorm_priors_constant_nonorm.rds")
 a_VE = 22.812; b_VE = 1.306
 
 #different subset of data:
-if(which.scenario == 1){
-  case.noti.df = rbind(filter(case.noti.LR.df, country == "BRA"), case.noti.PAHO.df)
-  sero_data = sero_data[NULL,]
-} else if(which.scenario == 2){
-  case.noti.df = filter(case.noti.LR.df, country != "BRA")
-} else {
-  case.noti.df = rbind(case.noti.LR.df, case.noti.PAHO.df)
-}
+case.noti.df = rbind(case.noti.LR.df, case.noti.PAHO.df)
+#case.noti.df = case.noti.df[case.noti.df$case != 0,]
+case.noti.df[is.na(case.noti.df$cov),]$pop = 1e-10
+case.noti.df[is.na(case.noti.df$cov),]$cov = 0
 
-case.noti.df = case.noti.df[case.noti.df$case != 0,]
 ###Study index:
 #Sero 
 sero_study_id = rle(as.character(sero_data$STUDY_ID))
@@ -48,13 +40,8 @@ N_case_study = length(case_study_id$lengths)
 nrow_case_study = mapply(rep, 1:N_case_study, each = case_study_id$lengths) %>% unlist() %>% as.vector()
 case_study_id = case_study_id$values
 
-if(which.scenario == 1){
-  N_study = N_case_study
-} else {
-  N_study = N_sero_study + N_case_study
-}
+N_study = N_sero_study + N_case_study
 
-if(which.scenario != 1){
 #Speed up calculation the likelihood for sero data:
 ind.pop = which(substr(names(sero_data),0,4)=='POP_')
 ind.cov = which(substr(names(sero_data),0,4)=='COV_')
@@ -89,7 +76,6 @@ n_row_sero = lengths(age_range_l)
 n_row_sero_stop = cumsum(n_row_sero)
 n_row_sero_start = n_row_sero_stop - n_row_sero + 1
 Nrow_sero = length(n_row_sero)
-}
 #n_row_sero_l = unlist(mapply(rep, 1:length(n_row_sero), n_row_sero))
 
 #Speed up calculation for case LR data:
@@ -97,7 +83,7 @@ year_case_max = aggregate(case.noti.df$year, list(nrow_case_study), max)$x[nrow_
 FOI_case_id_row = year_case_max - case.noti.df$year + case.noti.df$age + 1
 FOI_case_id_row_max = max(FOI_case_id_row)
 study_agegroup = interaction(case.noti.df$age_group_ID, case.noti.df$study_id) %>% as.vector()
-case_by_study_agegroup = aggregate(case.noti.df$case, list(study_agegroup), unique)$x
+case_by_study_agegroup = aggregate(case.noti.df$case, list(case.noti.df$age_group_ID), unique)$x
 length_case_study = rle(as.character(nrow_case_study))$lengths
 length_case_study_stop = cumsum(length_case_study)
 length_case_study_start = length_case_study_stop - length_case_study + 1
@@ -108,167 +94,11 @@ study_agegroup_start = study_agegroup_stop - study_agegroup_org + 1
 ###Stan code ####
 
 #Constant model:####
-if(model_type == "Constant" & data_subset == "SA"){
-  
-  stan_code = "
+stan_code = "
 data {
   int<lower=0> N;          // number studies
-  vector[100] age_seq; // age sequence from 0 to 99
-
-  int N_case_study_id[N]; //N_sero_study + 1:N
-  int<lower=0> N_nrow_case_study; //length(nrow_case_study)
-  int<lower=0> nrow_case_study[N_nrow_case_study];
-  int<lower=0> FOI_case_id_row[N_nrow_case_study];
-  int length_case_study[N];
-  int length_case_study_start[N];
-  int length_case_study_stop[N];
-  int nrow_FOI_append;
-  vector[N_nrow_case_study] pop; //Population
-  vector[N_nrow_case_study] cov; //coverage
-  int<lower=0> Nrow_case; 
-  int<lower=0> study_agegroup_org[Nrow_case];
-  int<lower=0> study_agegroup_start[Nrow_case];
-  int<lower=0> study_agegroup_stop[Nrow_case];
-  int<lower=0> case_by_study_agegroup[Nrow_case];
-  
-  //prior
-  real a_VE;
-  real b_VE;
-  vector[2] reporting_prop_prior;
-  vector[N] gamma_priors_mean;
-  vector[N] gamma_priors_sd;
-}
-
-parameters {
-  vector<lower=0>[N] gamma;
-  real age_dep1; //age dependent: position of the peak age
-  real<lower=0> age_dep2; //age dependent: spread of the peak
-  real age_dep3; //age dependent: skewness
-  vector<lower=-20, upper = 20>[N] rho_case;
-  real<lower=0, upper = 1> VE;
-}
-
-model {
-  //vector[100] age_dep_output_org;
-  vector[100] age_dep_output;
-  matrix[100, N] age_dep_m;
-  matrix[N, 100] gamma_m;
-  matrix[100, N] FOI_m;
-
-  vector[N] trans_rho_case;
-  vector[N_nrow_case_study] l_rho_case;
-  matrix[100, N] FOI_case_m;
-  matrix[nrow_FOI_append, N] FOI_case_m_appending;
-  matrix[100 + nrow_FOI_append, N] FOI_case_m_appended;
-  vector[N_nrow_case_study] FOI_case_v;
-  vector[N_nrow_case_study] FOI_case_int_v; 
-  vector[N_nrow_case_study] exp_cases_prob;
-  vector[N_nrow_case_study] exp_cases;
-  vector[Nrow_case] exp_case_by_age_group;
-  vector[Nrow_case] exp_cases_mod;
-  
-  // prior:
-  gamma ~ lognormal(gamma_priors_mean, gamma_priors_sd);
-  age_dep1 ~ normal(50, 125);
-  age_dep2 ~ normal(0, 150);
-  age_dep3 ~ student_t(2, 0, 0.5);
-  rho_case ~ normal(reporting_prop_prior[1], reporting_prop_prior[2]);
-  VE ~ beta(a_VE, b_VE);
-  
-  //Age dependent component of FOI:
-  for(age in 1:100){
-    age_dep_output[age] = exp(skew_normal_lpdf(age_seq[age]|age_dep1, age_dep2, age_dep3));
-  }
-  //age_dep_output = exp(age_dep_output_org - rep_vector(log_sum_exp(age_dep_output_org), 100));
-
-  //Combine to get the FOI matrix:
-  age_dep_m = rep_matrix(age_dep_output, N); //row: age; col: study
-  gamma_m = rep_matrix(gamma, 100); //row: study; col: age
-  FOI_m = age_dep_m .* (gamma_m)'; //row: age; col: study
-  
-  //LL from case data:
-  trans_rho_case = inv_logit(rho_case);
-  FOI_case_m_appending = rep_matrix(FOI_m[100,], nrow_FOI_append);
-  FOI_case_m_appended = append_row(FOI_m, FOI_case_m_appending);
-  for(xi in 1:N_nrow_case_study){
-    int FOI_case_id_int = FOI_case_id_row[xi] - 1;
-    FOI_case_v[xi] = FOI_case_m_appended[FOI_case_id_row[xi], nrow_case_study[xi]];
-    if(FOI_case_id_int == 0)
-      FOI_case_int_v[xi] = 0.0;
-    else
-      FOI_case_int_v[xi] = sum(head(FOI_case_m_appended[, nrow_case_study[xi]], FOI_case_id_int));
-  }
-  
-  l_rho_case = trans_rho_case[nrow_case_study];
-  exp_cases_prob = exp(-FOI_case_int_v) .* (1 - exp(-FOI_case_v)) .* l_rho_case;
-  exp_cases = exp_cases_prob .* pop .* (1 - cov*VE);
-
-  for(xviii in 1:Nrow_case){
-    exp_case_by_age_group[xviii] = sum(exp_cases[study_agegroup_start[xviii]:study_agegroup_stop[xviii]]);
-  }
-
-  for(xx in 1:(Nrow_case)){
-    if(exp_case_by_age_group[xx] < 1e-3)
-      exp_cases_mod[xx] = 1e-3;
-    else 
-      exp_cases_mod[xx] = exp_case_by_age_group[xx];
-  }
-  //print(poisson_lpmf(case_by_study_agegroup| exp_cases_mod));
-  // LL:
-  case_by_study_agegroup ~ poisson(exp_cases_mod);
-  //target += poisson_lpmf(case_by_study_agegroup| exp_cases_mod);
-}
-"
-
-#prior for gamma:
-coun_list_study = sapply(case_study_id, function(x) filter(case.noti.df, study_id == x)$country %>% unique)
-coun_list_study[!(coun_list_study %in% prior_gamma$ISO)] <- "BRA"
-match_prior_gamma = match(c( coun_list_study), prior_gamma$ISO)
-prior_gamma_input = prior_gamma[match_prior_gamma,]
-
-if(which.scenario != 2){
-  case.noti.df[is.na(case.noti.df$cov),]$pop = 1e-10
-  case.noti.df[is.na(case.noti.df$cov),]$cov = 0
-}
-
-data_stan = list(
-  N = N_study,          #number studies
-  age_seq = 0:99, #age sequence from 0 to 99
-  #n_samples_marLL = n_samples_marLL, #number of sample to calcualte marginal LL
-  #time_FOI_empty = matrix(0, nrow = N_study, ncol = 100),
-  
-  N_case_study = N_case_study, #number of case LR studies
-  N_case_study_id = 1:N_case_study, #N_sero_study + N_case_study + 1:N_case_study
-  N_nrow_case_study = length(nrow_case_study), #length(nrow_case_study)
-  nrow_case_study = nrow_case_study,
-  FOI_case_id_row = FOI_case_id_row,
-  nrow_FOI_append = max(FOI_case_id_row) - 100,
-  length_case_study = length_case_study,
-  length_case_study_start = length_case_study_start,
-  length_case_study_stop = length_case_study_stop,
-  Nrow_case = length(study_agegroup_org), 
-  pop = case.noti.df$pop, 
-  cov = case.noti.df$cov,
-  study_agegroup_org = study_agegroup_org,
-  study_agegroup_start = study_agegroup_start,
-  study_agegroup_stop = study_agegroup_stop,
-  case_by_study_agegroup = case_by_study_agegroup,
-  
-  #prior
-  a_VE = a_VE, b_VE = b_VE,
-  reporting_prop_prior = reporting_prop_prior,
-  gamma_priors_mean = prior_gamma_input$X1,
-  gamma_priors_sd = prior_gamma_input$X2
-)
-
-} 
-
-if(model_type == "Constant" & data_subset != "SA"){
-  
-  stan_code = "
-data {
-  int<lower=0> N;          // number studies
-  vector[100] age_seq; // age sequence from 0 to 99
+  int N_coun; //number of countries
+  int age_dep_coun_id[N];
   
   int N_sero_study;          // number sero studies
   int N_sero_study_id[N_sero_study]; // id of sero studies
@@ -300,7 +130,10 @@ data {
   int<lower=0> study_agegroup_org[Nrow_case];
   int<lower=0> study_agegroup_start[Nrow_case];
   int<lower=0> study_agegroup_stop[Nrow_case];
-  int<lower=0> case_by_study_agegroup[Nrow_case];
+  int case_by_study_agegroup[Nrow_case];
+  //int<lower=0> study_start[N_case_study];
+  //int<lower=0> study_stop[N_case_study];
+  //int<lower=0> study_nrow_all[N_case_study];
   
   //prior
   real a_VE;
@@ -311,21 +144,36 @@ data {
 }
 
 parameters {
-  //real<lower=-20, upper = 20> FOI[N];
   vector<lower=0>[N] gamma;
-  real age_dep1; //age dependent: position of the peak age
-  real<lower=0> age_dep2; //age dependent: spread of the peak
-  real age_dep3; //age dependent: skewness
+  vector[N_coun] age_dep1_std; //age dependent: position of the peak age
+  vector<lower=1e-10>[N_coun] age_dep2_std; //age dependent: spread of the peak
+  vector[N_coun] age_dep3_std; //age dependent: skewness
+  real age_dep1_mean;
+  real<lower=0> age_dep2_mean;
+  real age_dep3_mean;
+  real<lower=0> age_dep1_sd;
+  real<lower=0> age_dep2_sd;
+  real<lower=0> age_dep3_sd;
   vector<lower=-20, upper = 20>[N_case_study] rho_case;
+  //vector<lower=0, upper = 1>[N_case_study] rho_case;
   real<lower=0, upper = 1> VE;
 }
 
+transformed parameters {
+  vector[N_coun] age_dep1; //age dependent: position of the peak age
+  vector[N_coun] age_dep2; //age dependent: spread of the peak
+  vector[N_coun] age_dep3; //age dependent: skewness
+  //Reparameter
+  age_dep1 = age_dep1_mean + age_dep1_std*age_dep1_sd;
+  age_dep2 = age_dep2_mean + age_dep2_std*age_dep2_sd;
+  age_dep3 = age_dep3_mean + age_dep3_std*age_dep3_sd;
+}
+
 model {
-  //vector[100] age_dep_output_org;
-  vector[100] age_dep_output;
   matrix[100, N] age_dep_m;
   matrix[N, 100] gamma_m;
   matrix[100, N] FOI_m;
+  
   matrix[100, N_sero_study] FOI_sero_m;
   vector[N_row_sero_age] FOI_sero_cumsum;
   vector[N_row_sero_age] sus_pop;
@@ -346,20 +194,29 @@ model {
   
   // prior:
   gamma ~ lognormal(gamma_priors_mean, gamma_priors_sd);
-  age_dep1 ~ normal(50, 125);
-  age_dep2 ~ normal(0, 150);
-  age_dep3 ~ student_t(2, 0, 0.5);
+  age_dep1_mean ~ normal(50, 125);
+  age_dep2_mean ~ normal(0, 150);
+  age_dep3_mean ~ student_t(2, 0, 0.5);
+  age_dep1_sd ~ exponential(0.005);
+  age_dep2_sd ~ exponential(0.005);
+  age_dep3_sd ~ exponential(0.1);
   rho_case ~ normal(reporting_prop_prior[1], reporting_prop_prior[2]);
+  //rho_case ~ beta(reporting_prop_prior[1], reporting_prop_prior[2]);
   VE ~ beta(a_VE, b_VE);
+  
+  //Drawing standardized country par from the population par:
+  age_dep1_std ~ std_normal();
+  age_dep2_std ~ std_normal();
+  age_dep3_std ~ std_normal();
   
   //Age dependent component of FOI:
   for(age in 1:100){
-    age_dep_output[age] = exp(skew_normal_lpdf(age_seq[age]|age_dep1, age_dep2, age_dep3));
+    for(ii in 1:N){
+      age_dep_m[age,ii] = exp(skew_normal_lpdf(age - 1|age_dep1[age_dep_coun_id[ii]], age_dep2[age_dep_coun_id[ii]], age_dep3[age_dep_coun_id[ii]]));
+    }
   }
-  //age_dep_output = exp(age_dep_output_org - rep_vector(log_sum_exp(age_dep_output_org), 100));
   
   //Combine to get the FOI matrix:
-  age_dep_m = rep_matrix(age_dep_output, N);
   gamma_m = rep_matrix(gamma, 100);
   FOI_m = age_dep_m .* (gamma_m)';
   
@@ -398,6 +255,7 @@ model {
   }
   
   l_rho_case = trans_rho_case[nrow_case_study];
+  //l_rho_case = rho_case[nrow_case_study];
   exp_cases = exp(-FOI_case_int_v) .* (1 - exp(-FOI_case_v)) .* l_rho_case .* pop .* (1 - cov*VE);
 
   for(xviii in 1:Nrow_case){
@@ -410,29 +268,47 @@ model {
     else 
       exp_cases_mod[xx] = exp_case_by_age_group[xx];
   }
-
+  
   // LL:
-  target += binomial_lpmf(sero_pos| sero_size, p); //from sero data
-  target += poisson_lpmf(case_by_study_agegroup| exp_cases_mod);
+  target += binomial_lpmf(sero_pos| sero_size, p) + poisson_lpmf(case_by_study_agegroup| exp_cases_mod);
+  
+  //for(study in 1:N_case_study){
+  //  int study_nrow = study_nrow_all[study];
+  //  vector[study_nrow] case_by_study = case_by_study_agegroup[study_start[study]:study_stop[study]];
+  //  vector[study_nrow] exp_case_by_study = exp_case_by_age_group[study_start[study]:study_stop[study]];
+  //  vector[study_nrow] exp_case_by_study_mod;
+    //target += multinomial_lpmf(case_by_study| exp_case_by_study/sum(exp_case_by_study)) + poisson_lpmf(sum(case_by_study)| sum(exp_case_by_study));
+  //  for(xx in 1:study_nrow){
+  //    if(exp_case_by_study[xx] < 1e-10)
+  //      exp_case_by_study_mod[xx] = 1e-10;
+  //    else 
+  //      exp_case_by_study_mod[xx] = exp_case_by_study[xx];
+  //  }
+  //  target += lgamma(sum(case_by_study) + 1) - sum(lgamma(case_by_study + 1)) + sum(case_by_study .* (log(exp_case_by_study_mod) - log(sum(exp_case_by_study_mod)))) +
+  //            sum(case_by_study) .* log(sum(exp_case_by_study_mod)) - sum(exp_case_by_study_mod) - lgamma(sum(case_by_study) + 1);
+  //}
+  //print(binomial_lpmf(sero_pos| sero_size, p));
+  //print(exp_cases_mod);
+  //print(poisson_lpmf(case_by_study_agegroup| exp_cases_mod));
+  //target += normal_lpdf( age_dep1 | age_dep1_mean, age_dep1_sd) +  normal_lpdf( age_dep2 | age_dep2_mean, age_dep2_sd) +  normal_lpdf( age_dep3 | age_dep3_mean, age_dep3_sd);
 }
 "
 
 #prior for gamma:
 coun_list_study = sapply(case_study_id, function(x) filter(case.noti.df, study_id == x)$country %>% unique)
-coun_list_study[!(coun_list_study %in% prior_gamma$ISO)] <- "BRA"
+coun_list_study_prior = coun_list_study
+coun_list_study_prior[!(coun_list_study_prior %in% prior_gamma$ISO)] <- "BRA"
 sero_list_study = sapply(sero_study_id, function(x) filter(sero_data, STUDY_ID == x)$ISO %>% unique)
-match_prior_gamma = match(c(sero_list_study, coun_list_study), prior_gamma$ISO)
+match_prior_gamma = match(c(sero_list_study, coun_list_study_prior), prior_gamma$ISO)
 prior_gamma_input = prior_gamma[match_prior_gamma,]
-
-#
-if(which.scenario != 2){
-  case.noti.df[is.na(case.noti.df$cov),]$pop = 1e-10
-  case.noti.df[is.na(case.noti.df$cov),]$cov = 0
-}
+#age-dep by country:
+all_coun = unique(c(sero_list_study, coun_list_study))
+age_dep_coun_id = match(c(sero_list_study, coun_list_study), all_coun)
 
 data_stan = list(
   N = N_study,          #number studies
-  age_seq = 0:99, #age sequence from 0 to 99
+  N_coun = length(all_coun),
+  age_dep_coun_id = age_dep_coun_id,
   #n_samples_marLL = n_samples_marLL, #number of sample to calcualte marginal LL
   #time_FOI_empty = matrix(0, nrow = N_study, ncol = 100),
   
@@ -467,13 +343,32 @@ data_stan = list(
   study_agegroup_start = study_agegroup_start,
   study_agegroup_stop = study_agegroup_stop,
   case_by_study_agegroup = case_by_study_agegroup,
+  #study_start = study_start,
+  #study_stop = study_stop,
+  #study_nrow_all = study_org,
   
   #prior
   a_VE = a_VE, b_VE = b_VE,
-  reporting_prop_prior = reporting_prop_prior,
+  reporting_prop_prior = reporting_prop_prior, #c(1.05393, 800.78830), #reporting_prop_prior,
   gamma_priors_mean = prior_gamma_input$X1,
   gamma_priors_sd = prior_gamma_input$X2
 )
+
+#initial pars:
+init_f <- function(n = 1){
+  list(gamma = rlnorm(n*N_study,  prior_gamma_input$X1, prior_gamma_input$X2),
+       age_dep1_std = rnorm(n*N_coun),
+       age_dep2_std = rhnorm(n*N_coun), 
+       age_dep3_std = rnorm(n*N_coun),
+       #age_dep1_mean = rnorm(n, 50, 125),
+       #age_dep2_mean = rhnorm(n, 150),
+       #age_dep3_mean = rt(n, 2, 0.5),
+       #age_dep1_sd = rexp(n, 0.005),
+       #age_dep2_sd = rexp(n, 0.005),
+       #age_dep3_sd = rexp(n, 0.1),
+       rho_case = rnorm(n*(N_case_study), reporting_prop_prior[1], reporting_prop_prior[2]),
+       VE = rbeta(n, a_VE, b_VE)
+       )
 }
 
 stan_fit <- stan(
@@ -484,14 +379,17 @@ stan_fit <- stan(
   iter = 1e2,            # total number of iterations per chain
   cores = 4,  # number of cores (could use one per chain)
   thin = 1,
-  control = list(adapt_delta = 0.80, stepsize = 5)
+  control = list(adapt_delta = 0.80),
+  init = init_f
   #refresh = 0             # no progress shown
 )
+saveRDS(stan_fit, file = paste0("../output/MCMC_output/MCMC_output_1e4_heir_init_rstan.Rdata"))
 
-traceplot(stan_fit, pars = c("age_dep1", "age_dep2", "age_dep3", "lp__"))
+traceplot(stan_fit, pars = c("age_dep1_mean", "age_dep2_mean", "age_dep3_mean", "lp__"))
+pairs(stan_fit, pars = c("age_dep1_std[1]", "age_dep2_mean", "age_dep3_mean", "lp__"))
+traceplot(stan_fit, pars = c("age_dep1_sd", "age_dep2_sd", "age_dep3_sd", "lp__"))
+traceplot(stan_fit, pars = c("gamma", "lp__"))
 extract(stan_fit)
-saveRDS(stan_fit, file = paste0("../output/MCMC_output/MCMC_output_1e4_unipeakprior_sero_case_age_depend_", model_type, "_datasubset_", data_subset, "_rstan.Rdata"))
-
 #Results from crc ####
 library(dplyr)
 
@@ -544,7 +442,7 @@ data {
   int<lower=0> study_agegroup_org[Nrow_case_LR];
   int<lower=0> study_agegroup_start[Nrow_case_LR];
   int<lower=0> study_agegroup_stop[Nrow_case_LR];
-  int<lower=0> case_by_study_agegroup[Nrow_case_LR];
+  vector[Nrow_case_LR] case_by_study_agegroup;
   
   //prior
   real a_VE;

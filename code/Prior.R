@@ -28,6 +28,25 @@ hist(inverse_logit(rnorm(8e3,output$par[1], output$par[2] )), breaks = 1e3, xlim
 #hist(rbeta(8e3,output$par[1], output$par[2]), breaks = 1e3, xlim = c(0, 0.004))
 reporting_prop = output$par
 
+#Reporting proportion - beta
+rep_prop = c()
+for(which.scenario in 1:8){
+  load(paste0("/home/quan/Documents/NotreDame/Alex/Yellow fever/yf_ensemble-main/output/in_paper/proportion_by_type_", which.scenario,".RData"))
+  rep_prop = c(rep_prop, 1 - rdirichlet(1e3, prop.FCU)[,3])
+}
+
+inverse_logit <- function(x) exp(x)/(exp(x) + 1)
+logit <- function(x) log(x) - log(1-x)
+cost_func <- function(par){
+  -sum(dbeta(rep_prop, par[1], par[2], log = T))
+}
+
+output = optim(par = c(0.1, 0.1), cost_func, method = "BFGS")
+output
+hist(rep_prop)
+hist(rbeta(8e3,output$par[1], output$par[2]), breaks = 1e3, xlim = c(0, 0.004))
+reporting_prop = output$par
+
 #FOI
 case.df <- read.csv("/home/quan/Documents/NotreDame/Alex/Yellow fever/yf_age_exposure/data/yf_case_data_by_age_group_with_coverage_LR.csv")
 sero.df <- read.csv("/home/quan/Documents/NotreDame/Alex/Yellow fever/yf_age_exposure/data/yf_sero_data_with_coverage_mod.csv")

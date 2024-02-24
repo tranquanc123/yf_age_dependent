@@ -16,17 +16,17 @@ sero_data = filter(sero_data, YEAR > 1980) #only get data from 1980
 sero_study_id = rle(as.character(sero_data$STUDY_ID))
 sero_data = filter(sero_data, STUDY_ID %in% sero_study_id$values[which(sero_study_id$lengths > 1)]) # study with age group > 1
 case.noti.LR.df = read.csv("../data/yf_case_data_by_age_group_with_coverage_LR.csv")
-case.noti.PAHO.df = read.csv("../data/yf_case_data_by_age_group_with_coverage_PAHO.csv") %>% filter(!(study_id %in% c("ECU_PAHO", "ARG_PAHO")))
+case.noti.PAHO.df = read.csv("../data/yf_case_data_by_age_group_with_coverage_PAHO.csv")# %>% filter(!(study_id %in% c("ECU_PAHO", "ARG_PAHO")))
 
 #Prior:
 readRDS("../data/FOI_rho_prior.rds") %>% list2env(globalenv())
-prior_gamma = readRDS("../data/gamma_lnorm_priors_constant.rds")
+prior_gamma = readRDS("../data/gamma_lnorm_priors_constant_nonorm.rds")
 a_VE = 22.812; b_VE = 1.306
 
 #all scenarios
 SA_study_subset = c(unique(filter(case.noti.LR.df, country == "BRA")$study_id), unique(case.noti.PAHO.df$study_id))
 AF_study_subset = c(unique(sero_data$STUDY_ID), unique(filter(case.noti.LR.df, country != "BRA")$study_id))
-all_model_type = c("Constant", "No Age")
+all_model_type = c("Alternative", "Constant")
 all_data_subset  = c("SA", "AF")
 
 all_scen = expand.grid(model_type = all_model_type, data_subset = all_data_subset)
@@ -36,7 +36,7 @@ all_scen$all_data_type = c(rep(rep("case", length(SA_study_subset)), 2), rep(c(r
 rownames(all_scen) = 1:nrow(all_scen)
 
 #get a specific scenario:
-model_type = all_scen$model_type[which.scenario] # "Constant" #or "No Age"
+model_type = all_scen$model_type[which.scenario] # 
 data_subset = all_scen$data_subset[which.scenario] #"SA"
 study = all_scen$study[which.scenario]
 
@@ -51,7 +51,11 @@ if(data_subset != "AF"){
 
 #read in stan object:
 data_subset_age = all_data_subset[which(all_data_subset != data_subset)]
-age_dep = readRDS(paste0("../output/Age_exp_curve_", data_subset_age, "_Constant.rds"))
+if(model_type == "Constant"){
+  age_dep = matrix(1/100, nrow = 100, ncol = 1000)
+} else if(model_type == "Alternative"){
+  age_dep = readRDS(paste0("../output/Age_exp_curve_", data_subset_age, "_Constant.rds"))
+}
 n_samples = ncol(age_dep)
 
 #LL function
@@ -119,7 +123,6 @@ LL_validate <- function(par){
 }
 
 #model run
-
 if(data_type == 'case'){
   prior_gamma_input = filter(prior_gamma, ISO == unique(sel_study_data$country))
   if(nrow(prior_gamma_input) == 0) prior_gamma_input = filter(prior_gamma, ISO == "BRA")
@@ -150,6 +153,8 @@ output <- runMCMC(bayesianSetup = bayesanSetup, sampler = "DREAMzs", settings = 
 saveRDS(output, paste0("../output/MCMC_output/Validate_", data_subset, "_", model_type,"_", study,"_est.rds"))
 
 #get par from the output:
+setwd("/home/quan/Documents/NotreDame/Alex/Yellow fever/yf_age_exposure/code/")
+
 library(BayesianTools)
 library(dplyr)
 library(sn)
@@ -163,12 +168,12 @@ sero_data = filter(sero_data, YEAR > 1980) #only get data from 1980
 sero_study_id = rle(as.character(sero_data$STUDY_ID))
 sero_data = filter(sero_data, STUDY_ID %in% sero_study_id$values[which(sero_study_id$lengths > 1)]) # study with age group > 1
 case.noti.LR.df = read.csv("../data/yf_case_data_by_age_group_with_coverage_LR.csv")
-case.noti.PAHO.df = read.csv("../data/yf_case_data_by_age_group_with_coverage_PAHO.csv") %>% filter(!(study_id %in% c("ECU_PAHO", "ARG_PAHO")))
+case.noti.PAHO.df = read.csv("../data/yf_case_data_by_age_group_with_coverage_PAHO.csv") #%>% filter(!(study_id %in% c("ECU_PAHO", "ARG_PAHO")))
 
 #all scenarios
 SA_study_subset = c(unique(filter(case.noti.LR.df, country == "BRA")$study_id), unique(case.noti.PAHO.df$study_id))
 AF_study_subset = c(unique(sero_data$STUDY_ID), unique(filter(case.noti.LR.df, country != "BRA")$study_id))
-all_model_type = c("Constant", "No Age")
+all_model_type = c("Alternative", "Constant")
 all_data_subset  = c("SA", "AF")
 
 all_scen = expand.grid(model_type = all_model_type, data_subset = all_data_subset)
@@ -176,6 +181,7 @@ all_scen = all_scen[unlist(mapply(rep, 1:4, c(length(SA_study_subset), length(SA
 all_scen$study = c(SA_study_subset, SA_study_subset, AF_study_subset, AF_study_subset)
 all_scen$all_data_type = c(rep(rep("case", length(SA_study_subset)), 2), rep(c(rep("sero", 4), rep("case", length(AF_study_subset) - 4)), 2))
 rownames(all_scen) = 1:nrow(all_scen)
+all_scen = all_scen[1:28, ]
 
 gen_validate <- function(par, age_dep_id){
   gamma_val = par[1]
@@ -256,7 +262,7 @@ for(i in 1:nrow(all_scen)){
   }
   
   output <- readRDS(paste0("../output/MCMC_output/Validate_", data_subset, "_", model_type,"_", study,"_est.rds"))
-  par_output = getSample(output, start = round(iter/3/2), thin = 5) %>% tail(n_samples)
+  par_output = getSample(output, start = round(iter/3/2), thin = 10) %>% tail(n_samples)
   
   #Summary FOI, rho, VE:
   study_gamma = quantile95cri(par_output[,1])
@@ -273,7 +279,7 @@ for(i in 1:nrow(all_scen)){
   study_par_l = c(study_par_l, list(study_par))
   
   #Project age case pattern and data fit:
-  if(model_type == "No Age"){
+  if(model_type == "Constant"){
     age_dep = array(1/100, dim = c(100, n_samples))
   } else {
     age_dep = readRDS(paste0("../output/Age_exp_curve_", age_exp_subset, "_Constant.rds"))
@@ -340,8 +346,8 @@ library(ggplot2)
 library(Hmisc)
 setwd("/home/quan/Documents/NotreDame/Alex/Yellow fever/yf_age_exposure/code/")
 
-model_order = c("No Age", "Constant")
-model_colors = c("#f36201", "#fbbb09")
+model_order = c("Constant", "Alternative")
+model_colors = c("#8073ac", "#e08214")
 
 #WAIC:
 WAIC_validate = read.csv("../output/WAIC_validate.csv")
@@ -350,112 +356,160 @@ ggplot(WAIC_validate, aes(y = study, x = log10(delta_WAIC), fill = model_type))+
   geom_bar(stat = "identity", position = position_dodge(width = 0.5))+
   facet_wrap(data_subset~., scale = "free")
 
+#SA only:
+WAIC_validate = read.csv("../output/WAIC_validate.csv")
+WAIC_validate_SA = WAIC_validate %>% filter(data_subset == "SA")
+WAIC_validate_SA$WAIC = round(WAIC_validate_SA$WAIC)
+cbind(WAIC_validate_SA[1:14,c(3,5)], WAIC_No_age = WAIC_validate_SA[15:28,5])
+#cbind(WAIC_validate_SA[1:12,c(5)], WAIC_No_age = WAIC_validate_SA[13:24,5]) %>% colSums()
+
+# source_names = unique(WAIC_validate$study)
+# sero_names = source_names[13:16] %>% strsplit("-") %>% sapply(function(x) paste0(str_to_title(x[4]), " el al ", x[3]))
+# case_LR_names = source_names[-c(7:16)] %>% strsplit("_"); author_LR = sapply(case_LR_names, function(x) x[1]) ; author_LR[15] = "De Cock"; author_LR[6] = "Ribeiro"; author_LR[2] = "Saad"; year_LR = sapply(case_LR_names, function(x) tail(x, 1)); year_LR[18:19] <- paste0("1998-", year_LR[18:19])
+# case_LR_names = paste0(author_LR, " et al ", year_LR)
+# case_PAHO_names = paste0("PAHO - ", c("Bolivia", "Brazil", "Colombia", "Paraguay", "Peru", "Venezuela"))
+# source_names = c(case_LR_names[1:6], case_PAHO_names, sero_names, case_LR_names[7:20])
+
+source_names = unique(WAIC_validate$study)
+case_LR_names = source_names[1:6] %>% strsplit("_"); author_LR = sapply(case_LR_names, function(x) x[1]) ; author_LR[6] = "Ribeiro"; author_LR[2] = "Saad"; year_LR = sapply(case_LR_names, function(x) tail(x, 1)); 
+case_LR_names = paste0(author_LR, " et al ", year_LR)
+case_PAHO_names = paste0("PAHO - ", c("Argentina", "Bolivia", "Brazil", "Colombia", "Ecuador", "Paraguay", "Peru", "Venezuela"))
+source_names = c(case_LR_names, case_PAHO_names)
+
 #Summary parameters:
 Val_par <-read.csv("../output/Validate_par.csv")
 Val_par$model_type = factor(Val_par$model_type, levels = model_order)
-Val_par_plot <- ggplot(Val_par, aes(x = X50., y = study, color = model_type))+
+# Val_par_plot <- ggplot(Val_par, aes(x = X50., y = study, color = model_type))+
+#   geom_pointrange(aes(xmin = X2.5., xmax = X97.5.), position = position_dodge(width = 0.7))+
+#   facet_grid(data_subset~par, scale = "free", labeller = labeller(par = label_parsed))+
+#   scale_color_manual(values = model_colors)+
+#   labs(x = "", y = "Study", color = "Models")+
+#   theme_bw()+
+#   theme(text = element_text(size = 19), 
+#         axis.text.y = element_text(size = 14), 
+#         axis.text.x = element_text(size = 10),
+#         strip.text = element_text(size = 12))
+# Val_par_plot
+# ggsave("../plots/PAHO_par_plot.png", PAHO_par_plot, width = 8, height = 7)
+
+#SA only:
+Val_par_SA = Val_par %>% filter(data_subset == "SA") 
+Val_par_SA$study = factor(rep(rep(source_names[1:14], each = 3), 2), levels = c(source_names[1:14]))
+Val_par_SA[which(Val_par_SA$par == "~italic(rho)"), c("X2.5.", "X50.", "X97.5.")] <- log10(Val_par_SA[which(Val_par_SA$par == "~italic(rho)"), c("X2.5.", "X50.", "X97.5.")])
+Val_par_SA = Val_par_SA %>% mutate(model_type = case_when(model_type == "Alternative" ~ "Africa", TRUE ~ as.character(model_type)),
+                                   par = case_when(par == "~italic(rho)" ~ "~italic(rho)~(log10)", TRUE ~ as.character(par)))
+
+Val_par_plot <- ggplot(Val_par_SA, aes(x = X50., y = study, color = model_type))+
   geom_pointrange(aes(xmin = X2.5., xmax = X97.5.), position = position_dodge(width = 0.7))+
-  facet_grid(data_subset~par, scale = "free", labeller = labeller(par = label_parsed))+
+  facet_grid(.~par, scale = "free", labeller = labeller(par = label_parsed))+
   scale_color_manual(values = model_colors)+
-  labs(x = "", y = "Study", color = "Models")+
+  labs(x = "", y = "Study", color = "Age exposure")+
   theme_bw()+
   theme(text = element_text(size = 19), 
         axis.text.y = element_text(size = 14), 
-        axis.text.x = element_text(size = 10),
+        axis.text.x = element_text(size = 10, angle = -90),
         strip.text = element_text(size = 12))
 Val_par_plot
-ggsave("../plots/PAHO_par_plot.png", PAHO_par_plot, width = 8, height = 7)
+ggsave("../plots/Val_par_SA_plot.png", Val_par_plot, width = 8, height = 6)
 
-Val_age_proj <-readRDS("../output/Validate_datafit.rds")
-Val_age_sero_proj = Val_age_proj$study_age_sero_proj %>% 
-  cbind(CI = binconf(Val_age_proj$study_age_sero_proj$POSITIVE, Val_age_proj$study_age_sero_proj$SAMPLE_SIZE)) %>%
-  mutate(AGE_RANGE = paste0(formatC(AGE_LOWER, width = 2, flag = 0), "-", formatC(AGE_UPPER, width = 2, flag = 0)),
-         AGE_MID = (AGE_LOWER + AGE_UPPER)/2) 
-sero_fit_plot = ggplot(Val_age_sero_proj, aes(x = AGE_MID))+
-  geom_pointrange(aes(ymin = CI.Lower, ymax = CI.Upper, y = CI.PointEst))+
-  geom_ribbon(aes(ymin = X2.5., ymax = X97.5., fill = model_type), alpha = 0.5)+
-  geom_line(aes(y = X50., group = model_type), color = "black")+
-  scale_color_manual(values = model_colors)+
-  scale_fill_manual(values = model_colors)+
-  labs(x = "Age", y = "Positive proportion", color = "Data subset", fill = "Data subset")+
-  facet_wrap(.~STUDY_ID, scale = "free_y")+
-  theme_bw()+
-  theme(text = element_text(size = 18), 
-        axis.text.x = element_text(size = 12))
-sero_fit_plot
+# Val_age_proj <-readRDS("../output/Validate_datafit.rds")
+# Val_age_sero_proj = Val_age_proj$study_age_sero_proj %>% 
+#   cbind(CI = binconf(Val_age_proj$study_age_sero_proj$POSITIVE, Val_age_proj$study_age_sero_proj$SAMPLE_SIZE)) %>%
+#   mutate(AGE_RANGE = paste0(formatC(AGE_LOWER, width = 2, flag = 0), "-", formatC(AGE_UPPER, width = 2, flag = 0)),
+#          AGE_MID = (AGE_LOWER + AGE_UPPER)/2) %>% 
+#   mutate(model_type = case_when(model_type == "Constant" ~ "Africa", model_type == "No Age" ~ "Constant")) %>%
+#   mutate(study = rep((mapply(rep, source_names[13:16], c(4,5,5,10)) %>% unlist), 2))
+# 
+# sero_fit_plot = ggplot(Val_age_sero_proj, aes(x = AGE_MID))+
+#   geom_pointrange(aes(ymin = CI.Lower, ymax = CI.Upper, y = CI.PointEst))+
+#   geom_ribbon(aes(ymin = X2.5., ymax = X97.5., fill = model_type), alpha = 0.7)+
+#   geom_line(aes(y = X50., group = model_type), color = "black")+
+#   scale_color_manual(values = c("#82ad58","#4e7c6f"))+
+#   scale_fill_manual(values = c("#82ad58","#4e7c6f"))+
+#   labs(x = "Age", y = "Positive proportion", color = "Age exposure", fill = "Age exposure")+
+#   facet_wrap(.~study, scale = "free_y")+
+#   theme_bw()+
+#   theme(text = element_text(size = 18), 
+#         axis.text.x = element_text(size = 12))
+# sero_fit_plot
+# 
+# Val_age_case_proj = Val_age_proj$study_age_case_proj %>% 
+#   mutate(age_m = (age_l + age_u)/2)
+# Val_age_case_proj[,7:9] = round(Val_age_case_proj[,7:9])
+# ggplot(Val_age_case_proj, aes(x = age_m, fill = model_type))+
+#   geom_point(aes(y = case), color = "black")+
+#   geom_ribbon(aes(ymin = X2.5., ymax = X97.5.), alpha = 0.6)+
+#   geom_line(aes(y = X50., color = model_type))+
+#   scale_fill_manual(values = c("#82ad58","#4e7c6f"))+
+#   scale_color_manual(values = c("#82ad58","#4e7c6f"))+
+#   scale_y_log10()+
+#   labs(x = "Age", y = "Cases", color = "Models", fill = "Models")+
+#   facet_wrap(study~., scale = "free_y")+
+#   theme_bw()+
+#   theme(text = element_text(size = 20), 
+#         axis.text = element_text(size = 14))
 
-Val_age_case_proj = Val_age_proj$study_age_case_proj %>% 
-  mutate(age_m = (age_l + age_u)/2)
-Val_age_case_proj[,7:9] = round(Val_age_case_proj[,7:9])
-ggplot(Val_age_case_proj, aes(x = age_m, fill = model_type))+
-  geom_point(aes(y = case), color = "black")+
-  geom_ribbon(aes(ymin = X2.5., ymax = X97.5.), alpha = 0.6)+
-  geom_line(aes(y = X50., color = model_type))+
-  scale_fill_manual(values = model_colors)+
-  scale_color_manual(values = model_colors)+
-  scale_y_log10()+
-  labs(x = "Age", y = "Cases", color = "Models", fill = "Models")+
-  facet_wrap(study~., scale = "free_y")+
-  theme_bw()+
-  theme(text = element_text(size = 20), 
-        axis.text = element_text(size = 14))
 
-
-ggsave("../plots/PAHO_age_case_proj_plot.png", PAHO_age_case_proj_plot, width = 9, height = 6)
+#ggsave("../plots/PAHO_age_case_proj_plot.png", PAHO_age_case_proj_plot, width = 9, height = 6)
 
 #Combining with the original analysis:
-#WAIC:
-model_order = c("Same age exposure", "Alternative age exposure", "Constant age exposure")
-WAIC_same_place_age = readRDS("../output/par_sum_fit.rds")$WAIC_study_l
-WAIC_validate_full = rbind(WAIC_validate, data.frame(model_type = "Same age exposure", filter(WAIC_validate, model_type == "Constant")[,2:4], WAIC = WAIC_same_place_age[1:30])) %>%
-  mutate(model_type = case_when(model_type == "Constant" ~ "Alternative age exposure",
-                                model_type == "No Age" ~ "Constant age exposure", 
-                                TRUE ~ model_type))
+# #WAIC:
+# model_order = c("Same age exposure", "Alternative age exposure", "Constant age exposure")
+# WAIC_same_place_age = readRDS("../output/par_sum_fit.rds")$WAIC_study_l
+# WAIC_validate_full = rbind(WAIC_validate, data.frame(model_type = "Same age exposure", filter(WAIC_validate, model_type == "Constant")[,2:4], WAIC = WAIC_same_place_age[1:30])) %>%
+#   mutate(model_type = case_when(model_type == "Alternative" ~ "Alternative age exposure",
+#                                 model_type == "Constant" ~ "Constant age exposure", 
+#                                 TRUE ~ model_type))
+# 
+# WAIC_validate_full$model_type = factor(WAIC_validate_full$model_type, levels = model_order)
+# WAIC_validate_full$study = factor(WAIC_validate_full$study, levels = unique(WAIC_validate_full$study))
+# WAIC_validate_full =  (WAIC_validate_full %>% group_by(study) %>% summarise(model_type = model_type, data_subset = data_subset, study = study, delta_WAIC = WAIC - min(WAIC)))
+# ggplot(WAIC_validate_full, aes(y = study, x = log10(delta_WAIC), fill = model_type))+
+#   geom_bar(stat = "identity", position = position_dodge(width = 1))+
+#   facet_wrap(data_subset~., scale = "free")
 
-WAIC_validate_full$model_type = factor(WAIC_validate_full$model_type, levels = model_order)
-WAIC_validate_full$study = factor(WAIC_validate_full$study, levels = unique(WAIC_validate_full$study))
-WAIC_validate_full =  (WAIC_validate_full %>% group_by(study) %>% summarise(model_type = model_type, data_subset = data_subset, study = study, delta_WAIC = WAIC - min(WAIC)))
-ggplot(WAIC_validate_full, aes(y = study, x = log10(delta_WAIC), fill = model_type))+
-  geom_bar(stat = "identity", position = position_dodge(width = 1))+
-  facet_wrap(data_subset~., scale = "free")
-
-#sero data fit:
-sero_data_fit_comb = bind_rows(Val_age_sero_proj %>% mutate(model_type = case_when(model_type == "Constant" ~ "Alternative age exposure", model_type == "No Age" ~ "Constant age exposure")), 
-          sero_data_fit_plot %>% filter(data_subset == "Africa") %>% mutate(model_type = case_when(model_type == "Constant" ~ "Same age exposure"), study = STUDY_ID))
-sero_data_fit_comb$model_type  = factor(sero_data_fit_comb$model_type, levels = model_order)
-ggplot(sero_data_fit_comb, aes(x = AGE_MID))+
-  geom_pointrange(aes(ymin = CI.Lower, ymax = CI.Upper, y = CI.PointEst))+
-  geom_ribbon(aes(ymin = X2.5., ymax = X97.5., color = model_type, fill = model_type), alpha = 0.5)+
-  geom_line(aes(y = X50., group = model_type), color = "black")+
-  #scale_color_manual(values = model_colors)+
-  #scale_fill_manual(values = model_colors)+
-  labs(x = "Age", y = "Positive proportion", color = "Data subset", fill = "Data subset")+
-  facet_wrap(.~STUDY_ID, scale = "free_y")+
-  theme_bw()+
-  theme(text = element_text(size = 18), 
-        axis.text.x = element_text(size = 12))
+Val_age_proj <-readRDS("../output/Validate_datafit.rds")
+# #sero data fit:
+# sero_data_fit_comb = bind_rows(Val_age_sero_proj %>% mutate(model_type = case_when(model_type == "Alternative" ~ "Alternative age exposure", model_type == "Constant" ~ "Constant age exposure")), 
+#           sero_data_fit_plot %>% filter(data_subset == "Africa") %>% mutate(model_type = case_when(model_type == "Constant" ~ "Same age exposure"), study = STUDY_ID))
+# sero_data_fit_comb$model_type  = factor(sero_data_fit_comb$model_type, levels = model_order)
+# ggplot(sero_data_fit_comb, aes(x = AGE_MID))+
+#   geom_pointrange(aes(ymin = CI.Lower, ymax = CI.Upper, y = CI.PointEst))+
+#   geom_ribbon(aes(ymin = X2.5., ymax = X97.5., color = model_type, fill = model_type), alpha = 0.5)+
+#   geom_line(aes(y = X50., group = model_type), color = "black")+
+#   #scale_color_manual(values = model_colors)+
+#   #scale_fill_manual(values = model_colors)+
+#   labs(x = "Age", y = "Positive proportion", color = "Data subset", fill = "Data subset")+
+#   facet_wrap(.~STUDY_ID, scale = "free_y")+
+#   theme_bw()+
+#   theme(text = element_text(size = 18), 
+#         axis.text.x = element_text(size = 12))
 
 
 #case data fit:
-case_data_fit_comb = bind_rows(Val_age_case_proj %>% mutate(model_type = case_when(model_type == "Constant" ~ "Alternative age exposure", model_type == "No Age" ~ "Constant age exposure")), 
-                               case_data_fit_data %>% filter(data_subset != "Complete data") %>% mutate(model_type = case_when(model_type == "Constant" ~ "Same age exposure"), 
-                                                                                                 study = study_id, age_l = age_min, age_u = age_max, age_m = AGE_MID))
+# case_data_fit_comb = bind_rows(Val_age_proj$study_age_case_proj %>% mutate(model_type = case_when(model_type == "Alternative" ~ "Alternative age exposure", model_type == "Constant" ~ "Constant age exposure")), 
+#                                case_data_fit_data %>% filter(data_subset != "Complete data") %>% mutate(model_type = case_when(model_type == "Constant" ~ "Same age exposure"), 
+#                                                                                                  study = study_id, age_l = age_min, age_u = age_max, age_m = AGE_MID))
+case_data_fit_comb = bind_rows(Val_age_proj$study_age_case_proj %>% mutate(age_m = (age_l + age_u)/2))
+case_data_fit_comb$study = factor(mapply(rep, source_names, each = rle(case_data_fit_comb$study)$lengths) %>% unlist, levels = source_names)
 
-case_data_fit_comb$model_type  = factor(case_data_fit_comb$model_type, levels = model_order)
+case_data_fit_comb$model_type  = factor(case_data_fit_comb$model_type, levels = model_order) 
+case_data_fit_comb = case_data_fit_comb %>%
+  mutate(model_type = case_when(model_type == "Alternative" ~ "Africa", TRUE ~ as.character(model_type)))
 
 case_data_fit_comb_plot = ggplot(case_data_fit_comb, aes(x = age_m, fill = model_type))+
   geom_point(aes(y = case), color = "black")+
   geom_ribbon(aes(ymin = X2.5., ymax = X97.5.), alpha = 0.6)+
-  geom_line(aes(y = X50., color = model_type))+
-  #scale_fill_manual(values = model_colors)+
+  geom_line(aes(y = X50.), color = "black")+
+  scale_fill_manual(values = model_colors)+
   #scale_color_manual(values = model_colors)+
-  scale_y_log10()+
-  labs(x = "Age", y = "Cases", color = "Models", fill = "Models")+
+  #scale_y_log10()+
+  labs(x = "Age", y = "Cases", color = "Age exposure", fill = "Age exposure")+
   facet_wrap(study~., scale = "free_y")+
   theme_bw()+
   theme(text = element_text(size = 20), 
         axis.text = element_text(size = 14))
-
+case_data_fit_comb_plot
 ggsave("../plots/case_data_fit_comb_plot.png", case_data_fit_comb_plot, width = 15, height = 8)
 
 # WAIC_table <- read.csv("../output/WAIC_validate_PAHO.csv")

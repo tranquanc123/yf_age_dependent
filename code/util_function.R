@@ -38,6 +38,8 @@ if(data_subset != "SA"){
 #Speed up calculation the likelihood for sero data:
 ind.pop = which(substr(names(sero_data),0,4)=='POP_')
 ind.cov = which(substr(names(sero_data),0,4)=='COV_')
+sel_0_cov_study = which(sero_data$STUDY_ID %in% c("ETH-10-2014-TSEGAYE", "NGA-8-2008-BABA")) #no coverage for Baba and Tsegaye
+sero_data[sel_0_cov_study,ind.cov] = 0
 n_FOI_sero = nrow(sero_data)
 age_range_l = 
   sapply(1:n_FOI_sero, function(x){
@@ -169,20 +171,25 @@ FOI_function_model_type <- function(model_type){
 
 #function to generate cases and serological data:####
 gen_func <- function(par){
-  FOI_par = unlist(par[FOI_par_id]); 
+  
+  FOI_par = unlist(par[names_par == "gamma"]); 
   
   FOI_m = FOI_func(FOI_par) %>% matrix(nrow = 100, ncol = N_study)
   
-  Age_depend_par = par[Age_depend_id];
-  #Age_depend_par[2] <- 10^(Age_depend_par[2])
-  age_dep_term = age_dep_func(Age_depend_par)
+  age_dep_term_array = array(dim = c(100, N_study))
+  for(study in 1:N_study){
+    age_dep1 = par[which(names_par == "age_dep1")[study]]
+    age_dep2 = par[which(names_par == "age_dep2")[study]]
+    age_dep3 = par[which(names_par == "age_dep3")[study]]
+    age_dep_term_array[,study] = age_dep_func(c(age_dep1, age_dep2, age_dep3))
+  }
   
   #Include the effect of bg infection and age dependent:
-  FOI_m = ((FOI_m)*age_dep_term) %>% matrix(nrow = 100, ncol = N_study)
+  FOI_m = ((FOI_m)*age_dep_term_array) %>% matrix(nrow = 100, ncol = N_study)
   
-  VE = par[VE_id]
+  VE = par[names_par == "VE"]
   
-  rho_case = inverse_logit(unlist(par[rho_case_id]))
+  rho_case = inverse_logit(unlist(par[names_par == "rho_case"]))
   
   if(data_subset != "SA"){
     FOI_sero_m = FOI_m[, 1:N_sero_study]

@@ -107,3 +107,77 @@ ggplot(comp_FOI_data, aes(x = age, y = X50., color = FOI_used, fill = FOI_used))
 #   geom_ribbon(aes(ymin = X2.5., ymax = X97.5.), alpha = 0.4)+ 
 #   geom_line()
 #                            
+
+#
+n_cluster = 1e1
+n_pop = 1e0
+n_coun = 1e4
+rm(age_dep_data_coun_sum, age_dep_data_feature, age_dep_term_pop);gc()
+age_dep_term_pop = array(dim = c(100, n_cluster, n_pop, n_coun)) #age: 100; number of clusters: 10; 
+for(ii in 1:n_pop){
+  age_dep1_pop_mean = rnorm(n_cluster, 50, 125)
+  age_dep2_pop_mean = rhnorm(n_cluster, 150)
+  age_dep3_pop_mean = rt(n_cluster,2,1/2)
+  age_dep1_pop_sd = rexp(n_cluster, 1/200)
+  age_dep2_pop_sd = rexp(n_cluster, 1/200)
+  age_dep3_pop_sd = rexp(n_cluster, 1/10)
+  age_dep1_coun = sapply(1:n_cluster, function(x) rnorm(n_coun, age_dep1_pop_mean[x], age_dep1_pop_sd[x]))
+  age_dep2_coun = sapply(1:n_cluster, function(x) rnorm(n_coun, age_dep2_pop_mean[x], age_dep2_pop_sd[x]))
+  age_dep3_coun = sapply(1:n_cluster, function(x) rnorm(n_coun, age_dep3_pop_mean[x], age_dep3_pop_sd[x]))
+ 
+  #(aov(value ~ cluster, data.frame(cluster = rep(1:10, each = 1e2), value = as.vector(age_dep1_coun))) %>% summary)[[1]]$`Pr(>F)`[1]
+  for(i in 1:length(age_dep1_coun)){
+    sel_id_i = ((i - 1) %/% n_coun) + 1
+    sel_id_ii = i - (sel_id_i - 1)*n_coun
+    age_dep_term_pop[, sel_id_i, ii, sel_id_ii] = dsn(0:99, age_dep1_coun[i], age_dep2_coun[i], age_dep3_coun[i], log = T)
+  }
+}
+
+age_dep_data = cbind(expand.grid(age = 0:99, cluster = 1:n_cluster, pop = 1:n_pop, coun = 1:n_coun), value = as.vector(age_dep_term_pop))
+age_dep_data_feature = age_dep_data %>% group_by(cluster, pop, coun) %>% summarise(peak_age = age[which.max(value)],
+                                                          diff_high_low = log(diff(range(value)),10),
+                                                          diff_mod_mean = (which.max(value) - 1) - sum((0:99)*exp(value - logSumExp(value))))
+rm(age_dep_data);gc()
+filter(age_dep_data_feature, peak_age != 0, peak_age != 99)
+
+age_dep_data_coun_sum = age_dep_data_feature %>% group_by(cluster, pop) %>% summarise(sd_peak_age = sd(peak_age), sd_diff_high_low = sd(diff_high_low), sd_diff_mod_mean = sd(diff_mod_mean))
+age_dep_data_pop_sum = age_dep_data_feature %>% group_by(pop) %>% summarise(sd_peak_age = sd(peak_age), sd_diff_high_low = sd(diff_high_low, na.rm = T), sd_diff_mod_mean = sd(diff_mod_mean, na.rm = T))
+
+hist(filter(age_dep_data_coun_sum, sd_peak_age != 0)$sd_peak_age,50,col='gray',
+     xlab='sd of peak age within a country',main='')
+hist(age_dep_data_coun_sum$sd_diff_high_low,50,col='gray',
+     xlab='sd of fold difference between exposure of high and low age on log10 scale within a country',main='')
+hist(age_dep_data_coun_sum$sd_diff_mod_mean,50,col='gray',
+     xlab='sd of difference between mode and mean within a country',main='')
+
+hist(age_dep_data_pop_sum$sd_peak_age,50,col='gray',
+     xlab='sd of peak age of population draw',main='')
+hist(age_dep_data_pop_sum$sd_diff_high_low,50,col='gray',
+     xlab='sd of fold difference between exposure of high and low age on log10 scale of population draw',main='')
+hist(age_dep_data_pop_sum$sd_diff_mod_mean,50,col='gray',
+     xlab='sd of difference between mode and mean of population drawr',main='')
+
+par(mfrow=c(3,4))
+for(plot_i in 1:10){
+  matplot(exp(age_dep_term_pop[, plot_i,2, ])^0.2, type = "l", lty = 1)
+}
+
+par(mfrow=c(3,4))
+for(plot_i in 1:10){
+  # fold difference between exposure of highest and lowest age
+  hist(filter(age_dep_data_feature, cluster == plot_i, pop == 1)$diff_high_low,50,col='gray',
+       xlab='fold difference between exposure of high and low age on log10 scale',main='')
+}
+#
+par(mfrow=c(3,4))
+for(plot_i in 1:10){
+  # peak age
+  hist(filter(age_dep_data_feature, cluster == plot_i, pop == 1, peak_age != 0, peak_age != 99)$peak_age,50,col='gray',xlab='peak age',main='') #Removing peak age at 1 and 100
+}
+#
+par(mfrow=c(3,4))
+for(plot_i in 1:10){
+  # difference between mode and mean
+  hist(filter(age_dep_data_feature, cluster == plot_i, pop == 1)$diff_mod_mean,50,col='gray',
+       xlab='difference between mode and mean',main='')
+}
