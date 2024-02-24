@@ -2,10 +2,6 @@ library(dplyr)
 library(rstan)
 library(extraDistr)
 
-#setwd("/home/quan/Documents/NotreDame/Alex/Yellow fever/yf_age_exposure/code/")
-#running parallel in crc, which.scenario is the index:
-
-#all_model_type = c('Constant', "One_outbreak", "Two_outbreaks")
 model_type = "Constant" #all_model_type[which.scenario]
 data_subset = "SA_AF"
 
@@ -76,7 +72,6 @@ n_row_sero = lengths(age_range_l)
 n_row_sero_stop = cumsum(n_row_sero)
 n_row_sero_start = n_row_sero_stop - n_row_sero + 1
 Nrow_sero = length(n_row_sero)
-#n_row_sero_l = unlist(mapply(rep, 1:length(n_row_sero), n_row_sero))
 
 #Speed up calculation for case LR data:
 year_case_max = aggregate(case.noti.df$year, list(nrow_case_study), max)$x[nrow_case_study]
@@ -316,9 +311,3 @@ stan_fit <- stan(
   #refresh = 0             # no progress shown
 )
 saveRDS(stan_fit, file = paste0("../output/MCMC_output/MCMC_output_1e4_globalcurve_init_rstan.Rdata"))
-
-traceplot(stan_fit, pars = c("age_dep1", "age_dep2", "age_dep3", "lp__"))
-pairs(stan_fit, pars = c("age_dep1_std[1]", "age_dep2_mean", "age_dep3_mean", "lp__"))
-traceplot(stan_fit, pars = c("age_dep1_sd", "age_dep2_sd", "age_dep3_sd", "lp__"))
-traceplot(stan_fit, pars = c("gamma", "lp__"))
-extract(stan_fit)

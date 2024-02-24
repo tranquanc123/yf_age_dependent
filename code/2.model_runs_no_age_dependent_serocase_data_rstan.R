@@ -3,11 +3,7 @@ library(rstan)
 library(extraDistr)
 library(matrixStats)
 
-#setwd("/home/quan/Documents/NotreDame/Alex/Yellow fever/yf_age_exposure/code/")
-#running parallel in crc, which.scenario is the index:
-
-#all_model_type = c('Constant', "One_outbreak", "Two_outbreaks")
-model_type = "Constant" #all_model_type[which.scenario]
+model_type = "Constant"
 data_subset = "SA_AF"
 
 #Load data:
@@ -18,7 +14,6 @@ sero_data = filter(sero_data, STUDY_ID %in% sero_study_id$values[which(sero_stud
 case.noti.LR.df = read.csv("../data/yf_case_data_by_age_group_with_coverage_LR.csv")
 case.noti.PAHO.df = read.csv("../data/yf_case_data_by_age_group_with_coverage_PAHO.csv") %>% filter(!(study_id %in% c("ECU_PAHO", "ARG_PAHO")))
 readRDS("../data/FOI_rho_prior.rds") %>% list2env(globalenv())
-#prior_gamma = readRDS("../data/gamma_lnorm_priors_constant_nonorm.rds")
 #Vaccine efficacy: alpha and beta of beta distribution
 a_VE = 22.812; b_VE = 1.306
 
@@ -195,7 +190,7 @@ if(data_type == "case"){
   study_agegroup_stop = cumsum(study_agegroup_org)
   study_agegroup_start = study_agegroup_stop - study_agegroup_org + 1
   
-  #Constant model:####
+#Constant model:####
   stan_code = "
 data {
   int length_case_study;
@@ -314,11 +309,7 @@ library(dplyr)
 library(rstan)
 library(extraDistr)
 
-#setwd("/home/quan/Documents/NotreDame/Alex/Yellow fever/yf_age_exposure/code/")
-#running parallel in crc, which.scenario is the index:
-
-#all_model_type = c('Constant', "One_outbreak", "Two_outbreaks")
-model_type = "Constant" #all_model_type[which.scenario]
+model_type = "Constant" 
 data_subset = "SA_AF"
 
 inverse_logit <- function(x) exp(x)/(exp(x) + 1)

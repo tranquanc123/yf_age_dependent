@@ -5,10 +5,8 @@ library(sn)
 library(rstan)
 library(extraDistr)
 
-setwd("/home/quan/Documents/NotreDame/Alex/Yellow fever/yf_age_exposure/code/")
-
 #Load data:
-model_type = "Constant" #all_model_type[which.scenario]
+model_type = "Constant"
 data_subset = "SA_AF"
 
 #Load data:
@@ -195,12 +193,6 @@ if(model_sel == "globalcurve"){
 
 sum_stan = summary(stan_fit_ob)$summary
 summary(stan_fit_ob)$c_summary["lp__",, ]
-#traceplot(stan_fit_ob, pars = c("age_dep1", "age_dep2", "age_dep3", "lp__"))
-# traceplot(stan_fit_ob, pars = c("gamma"))
-# traceplot(stan_fit_ob, pars = c("rho_case"))
-# traceplot(stan_fit_ob, pars = c("VE"))
-# pairs(stan_fit_ob, pars =c("VE" ,"age_dep1_mean", "age_dep2_mean", "age_dep3_mean"))
-# stan_dens(stan_fit_ob, pars = c("age_dep1", "age_dep2", "age_dep3"))
 
 if(model_sel == "globalcurve"){
   par_sel = extract(stan_fit_ob, pars = c("gamma", "age_dep1", "age_dep2", "age_dep3", 
@@ -434,6 +426,3 @@ if(model_sel == "counspec"){
                #Age_dept_mode = quantile95cri(Age_dept_mode), Age_high_to_low_ratio = quantile95cri(Age_dept_ratio_hl), Age_dept_ratio_hy = Age_dept_ratio_hy, Age_dept_ratio_ho = Age_dept_ratio_ho, 
                sero_data_fit = sero_data_fit, case_data_fit = case_data_fit), "../output/par_sum_fit_heir_noage.rds")
 }
-
-
-
